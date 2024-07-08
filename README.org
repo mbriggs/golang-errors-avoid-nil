@@ -1,0 +1,117 @@
+* Avoiding panics
+
+** What are the ways you can panic in golang?
+   This is not an exhaustive list, just off the top of my head
+   - nil reference
+   - nil map writes
+   - array or slice out of bounds
+   - divide by zero
+   - type assertion failure
+   - closing a closed channel
+   - sending to a closed channel
+
+** How can we do what we can to avoid these situations?
+
+*** Know when you are being risky
+    - That list are probably the major areas
+    - If you keep that in the back of your mind it will take you a long way
+    - If you are in that kind of area, think about what does recovery look like?
+
+** The magic of recover()
+   - something like gin has recovery middleware builtin,
+   - If you are not in the handler goroutine, recovery is on you
+   - If you _are_ in a handler goroutine, it may be worth adding an error boundary regardless
+
+   #+BEGIN_SRC go
+   func FlawlessFunc() {
+      defer func() {
+         if err := recover(); err != nil {
+            // handle it
+         }
+      }()
+   }
+   #+END_SRC
+
+**** Remember: a goroutine that panics will just exit
+     - if a panic happens in a goroutine, it will nuke the goroutine and not recover
+     - this was a factor in the recent outage
+
+*** Dont be risky unless you need to be
+    - Be very careful when dereferencing array elements by index
+    - Be careful when dividing numbers
+    - Use safe type assertions
+    - Be careful when working with channels
+    - Avoid nil
+
+** Avoiding risk with nil
+   - Only pointers can be nil
+   - Nil is dangerous
+   - Because of that, we should avoid pointers unless there is a good reason
+
+*** Performance
+    - If you don't understand the nuance here, don't worry about it too much
+    - Default to using values, not pointers
+
+**** Facts
+    - copying a pointer to the heap is cheap
+    - heap memory allocation is expensive (relatively)
+    - heap garbage collection is expensive (relatively)
+    - stack variable deallocation is cheap (relatively)
+
+**** Micro-optimization
+     - there is a sweet spot where values are cheaper then pointers
+     - hard to know where, less then cpu cache size is safely cheaper
+
+***** "Premature optimization is the root of all evil" - Don Knuth
+      - however, none of that matters unless you have a measurement that shows it matters
+      - If you have megabytes of data, use the heap for performance
+      - If you have 25 small values on a struct, you are probably optimizing for immeasurably small benefits
+      - Sometimes its not immeasurable, but that needs to be backed up with data
+
+*** When to use pointers?
+
+**** You want to pass a reference that can mutate the struct
+     - this should be rare, but certain cases are common
+     - e.g. json unmarshall
+     - Don't work with a pointer in the parent function when possible, create a pointer to your value at the point of passing
+
+       #+BEGIN_SRC go
+       var mutatable Mutatable
+       FuncThatMutates(&mutatable) // pointer created here!
+       #+END_SRC
+
+**** You have a valid performance reason
+     - pointing to a large amount of data
+     - micro-optimization + measurement and target goal
+
+**** You have a singleton resource
+     - like a socket, probably made through a third party library
+
+*** What about a query that returns nothing?
+    - This is a good use case for something like ErrNotFound as a signal of the "return state" of a function
+
+* Errors in golang
+
+** Errors are not exceptions, and not Result monads, but they are similar to both
+   - Errors are values that you can query for type and use for flow control
+   - Errors allow delegation of how to handle a condition to a parent function
+   - Errors are accumulators for information on how something may have gone wrong
+   - Errors are signals for the state of a function return
+
+** Flow control
+   - errors.Is(err, ErrSentinal)
+   - errors are chains of values, a query is for any element of the chain
+   - good to start chains with static, public vars, so they can be queried
+
+** Accumulators
+   - an error should only be logged once, at the point in the code where it is handled
+   - if an error is kicked up the call stack, it should be wrapped
+   - %w is the sprintf token to know for wrapping
+   - only wrap if you can add useful information
+   - if you do not wrap, ask yourself if the current function you are in should exist, or you are splitting stuff up too much
+     #+BEGIN_SRC go
+     if err != nil {
+       return fmt.Errorf("finding widget %s in location %d: %w", widget.Code, location.Id, err)
+     }
+     #+END_SRC
+
