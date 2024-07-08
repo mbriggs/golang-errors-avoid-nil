@@ -17,12 +17,35 @@ func (b Book) String() string {
 	return b.Title
 }
 
-// ErrNotFound is returned when a book is not found in the library
-var ErrNotFound = errors.New("book not found in library")
+// ErrBookNotFound is returned when a book is not found in the library
+var ErrBookNotFound = errors.New("book not found in library")
+
+// ErrInvalidBook is returned when trying to add a book without a title
+var ErrInvalidBook = errors.New("invalid book")
+
+// ErrBookAlreadyExists is returned when trying to add a book that already exists
+var ErrBookAlreadyExists = errors.New("book already exists")
 
 // Library is a collection of books
 type Library struct {
 	Books []Book
+}
+
+// AddBook to Library
+func (l *Library) AddBook(book Book) error {
+	if book.Title == "" {
+		return ErrInvalidBook
+	}
+
+	for _, b := range l.Books {
+		if b.Title == book.Title {
+			return fmt.Errorf("adding %s: %w", book.Title, ErrBookAlreadyExists)
+		}
+	}
+
+	l.Books = append(l.Books, book)
+
+	return nil
 }
 
 // FindBook in Library by title. If not found, returns ErrNotFound
@@ -38,7 +61,7 @@ func (l Library) FindBook(title string) (Book, error) {
 		}
 	}
 
-	return Book{}, fmt.Errorf("finding %s: %w", title, ErrNotFound)
+	return Book{}, fmt.Errorf("finding %s: %w", title, ErrBookNotFound)
 }
 
 // normalizeTitle normalizes a title by making it lowercase and removing punctuation and whitespace
@@ -56,15 +79,32 @@ func normalizeTitle(title string) string {
 }
 
 func main() {
-
 	// Create a Library with some books
-	library := Library{
-		Books: []Book{
-			{Title: "1984"},
-			{Title: "Dune"},
-			{Title: "Hitchhiker's Guide to the Galaxy"},
-			{Title: "The Lord of the Rings"},
-		},
+	library := Library{}
+
+	// books to add
+	books := []Book{
+		{Title: "1984"},
+		{Title: "Dune"},
+		{Title: "Hitchhiker's Guide to the Galaxy"},
+		{Title: "The Lord of the Rings"},
+	}
+
+	for _, book := range books {
+		err := library.AddBook(book)
+
+		// if a book already exists, log out and continue
+		if errors.Is(err, ErrBookAlreadyExists) {
+			fmt.Printf("Book already exists! %s\n", err)
+			continue
+		}
+
+		// if book is invalid, log out and exit
+		if err != nil {
+			fmt.Printf("Invalid book! %s\n", err)
+			os.Exit(1)
+			return
+		}
 	}
 
 	searchTitles := os.Args[1:]
@@ -74,9 +114,10 @@ func main() {
 		book, err := library.FindBook(searchTitle)
 
 		// Book not found should log out and exit
-		if errors.Is(err, ErrNotFound) {
+		if errors.Is(err, ErrBookNotFound) {
 			fmt.Printf("Book not found! %s\n", err)
 			os.Exit(1)
+			return
 		}
 
 		// Other reasons should be a crash
